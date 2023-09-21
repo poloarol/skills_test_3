@@ -1,0 +1,7 @@
+/data
+/reference
+/VerifyBamID
+/pipeline/.snakemake
+/pipeline/workflow/.snakemake
+/pipeline/logs
+test.sh

@@ -1,0 +1,91 @@
+
+from pathlib import Path
+
+configfile: 'config/config.yaml'
+
+data_path: str = config['data_path']['root']
+
+pathlist = Path(data_path).glob("data/input/*.cram")
+
+
+contamination_targets = []
+
+for path in pathlist:
+    sample_name = path.name.split('.')[0]
+    contamination_files = expand("{data_path}/data/output/contamination/{sample_name}.{ext}", data_path=data_path, sample_name=sample_name, ext=['selfSM', 'Ancestry'])
+    contamination_targets.extend(contamination_files)
+
+
+rule all:
+    input:
+        contamination_targets,
+        expand("{data_path}/data/output/Contamination.txt", data_path=data_path),
+        expand("{data_path}/data/output/all_estimated_pcs.txt", data_path=data_path),
+
+
+rule detect_contamination:
+    input:
+        "{data_path}/data/input/{sample_name}.GRCh38.low_coverage.cram"
+    output:
+        "{data_path}/data/output/contamination/{sample_name}.selfSM",
+        "{data_path}/data/output/contamination/{sample_name}.Ancestry"
+    params:
+        VERIFY_BAM_ID_HOME = config['data_path']['VBID2'],
+        hg38 = config['references']['hg38'],
+        estimates = config['references']['estimates'],
+        outputfolder = "{data_path}/data/output/contamination/{sample_name}",
+    threads: config['num_threads']
+    log: "log/contamiantion/{sample_name}.log"
+    shell:
+        '''
+        #!/bin/bash
+
+        {params.VERIFY_BAM_ID_HOME}/bin/VerifyBamID \
+            --SVDPrefix {params.VERIFY_BAM_ID_HOME}/{params.estimates} \
+            --Reference {params.hg38} \
+            --BamFile {input} \
+            --Output {params.outputfolder} \
+            --NumPC 4 \
+            --NumThread {threads} 2> {log}
+        '''
+
+
+rule combined_contamination:
+    input:
+        "{data_path}/data/output/contamination"
+    output:
+        contamination = "{data_path}/data/output/Contamination.txt"
+    shell:
+        '''
+        #!/bin/bash
+
+        # Create the output file
+        echo -e "SAMPLE\tFREEMIX" > {output.contamination}
+
+        # Iterate through *.selfSM files in the directory
+        for file in {input}/*.selfSM; do
+            # Extract SEQ_ID and FREEMIX columns and append to the output file
+            awk '{{print $1 "\t" $7}}' "$file" | tail -n +2 >> {output.contamination}
+        done
+        '''
+
+
+rule combined_pcs:
+    input:
+        "{data_path}/data/output/contamination"
+    output:
+        estimates = "{data_path}/data/output/all_estimated_pcs.txt"
+    shell:
+        '''
+        #!/bin/bash
+
+        # Create the output file with headers
+        echo -e "PC\tIntendedSample\tFile" > {output}
+
+        # Iterate through all *.Ancestry files in the directory
+        for file in {input}/*.Ancestry; do
+            # Extract PC and IntendedSample columns, and append to output.txt
+            awk '{{print $1 "\t" $3 "\t'"$(basename -s .Ancestry "$file")"'"}}' "$file" | tail -n +2 >> {output}
+        done
+
+        '''
