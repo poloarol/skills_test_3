@@ -1,8 +1,7 @@
 ---
 data_path: 
   root: "/home/user/skills_test_3"
-  VBID2: "/home/user/software/VerifyBamID"
 references:
   hg38: "reference/GRCh38_full_analysis_set_plus_decoy_hla.fa"
-  estimates: "/resource/1000g.phase3.100k.b38.vcf.gz.dat"
+  estimates: "resource/1000g.phase3.100k.b38.vcf.gz.dat"
 num_threads: 3

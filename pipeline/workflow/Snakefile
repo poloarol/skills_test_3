@@ -1,7 +1,44 @@
 
+import glob
+import warnings
+
 from pathlib import Path
+from typing import List
+
+import pandas as pd
+import plotly.express as px
+from joblib import load
+from plotnine import ggplot, aes, labs, geom_point
+from plotnine.scales import scale_color_brewer
+
+warnings.filterwarnings("ignore")
 
 configfile: 'config/config.yaml'
+
+
+def load_data(path_to_file: str, colnames: List[str] = []):
+    if colnames:
+        return pd.read_csv(path_to_file, names=colnames, header=None, delimiter="\t")
+    return pd.read_csv(path_to_file, delimiter="\t")
+
+def plot_data(df, x_label, y_label, cols):
+    plt = (
+            ggplot(df)
+                + aes(x=x_label, y=y_label, color=cols)
+                + labs(
+                    x=x_label,
+                    y=y_label,
+                    color=cols
+                )
+                + scale_color_brewer(type='qual')
+                + geom_point()
+            )
+            
+    return plt
+
+def save_plot(plt, path):
+    plt.save(path, height=6, width=8)
+
 
 data_path: str = config['data_path']['root']
 
@@ -9,10 +46,13 @@ pathlist = Path(data_path).glob("data/input/*.cram")
 
 
 contamination_targets = []
+tmp_contamination_targets = []
 
 for path in pathlist:
     sample_name = path.name.split('.')[0]
-    contamination_files = expand("{data_path}/data/output/contamination/{sample_name}.{ext}", data_path=data_path, sample_name=sample_name, ext=['selfSM', 'Ancestry'])
+    contamination_files = expand("{data_path}/data/output/contamination/{sample_name}.{ext}", 
+        data_path=data_path, sample_name=sample_name, ext=['selfSM', 'Ancestry'])
+
     contamination_targets.extend(contamination_files)
 
 
@@ -21,71 +61,160 @@ rule all:
         contamination_targets,
         expand("{data_path}/data/output/Contamination.txt", data_path=data_path),
         expand("{data_path}/data/output/all_estimated_pcs.txt", data_path=data_path),
+        expand("{data_path}/data/output/plots/PC1_PC2.png", data_path=data_path),
+        expand("{data_path}/data/output/plots/PC2_PC3.png", data_path=data_path),
+        expand("{data_path}/data/output/plots/PC3_PC4.png", data_path=data_path),
+        expand("{data_path}/data/output/plots/PC1_PC2_PC3.png", data_path=data_path),
+        expand("{data_path}/data/output/Populations.csv", data_path=data_path)
 
 
 rule detect_contamination:
+    priority: 10
     input:
         "{data_path}/data/input/{sample_name}.GRCh38.low_coverage.cram"
     output:
-        "{data_path}/data/output/contamination/{sample_name}.selfSM",
-        "{data_path}/data/output/contamination/{sample_name}.Ancestry"
+        contamination_file = "{data_path}/data/output/contamination/{sample_name}.selfSM",
+        ancestry_file = "{data_path}/data/output/contamination/{sample_name}.Ancestry"
     params:
-        VERIFY_BAM_ID_HOME = config['data_path']['VBID2'],
+        VERIFY_BAM_ID_HOME = config['data_path']['root'],
         hg38 = config['references']['hg38'],
         estimates = config['references']['estimates'],
         outputfolder = "{data_path}/data/output/contamination/{sample_name}",
+        num_pcs = 4
     threads: config['num_threads']
-    log: "log/contamiantion/{sample_name}.log"
+    message: "$(date +%F_%T) - Analysing sample: {sample_name}"
+    log: "{data_path}/pipeline/log/contamination/{sample_name}.log"
     shell:
         '''
         #!/bin/bash
 
-        {params.VERIFY_BAM_ID_HOME}/bin/VerifyBamID \
-            --SVDPrefix {params.VERIFY_BAM_ID_HOME}/{params.estimates} \
-            --Reference {params.hg38} \
+        echo {message} > {log}
+        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
+
+        {data_path}/VerifyBamID/bin/VerifyBamID \
+            --SVDPrefix {data_path}/VerifyBamID/{params.estimates} \
+            --Reference {data_path}/{params.hg38} \
             --BamFile {input} \
             --Output {params.outputfolder} \
-            --NumPC 4 \
+            --NumPC {params.num_pcs} \
             --NumThread {threads} 2> {log}
+
+        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
         '''
+
 
 
 rule combined_contamination:
+    priority: 2
     input:
-        "{data_path}/data/output/contamination"
+        infile = expand("{data_path}/data/output/contamination/{sample_name}.selfSM", \
+            data_path=data_path, sample_name=sample_name)
     output:
-        contamination = "{data_path}/data/output/Contamination.txt"
+        outfile = "{data_path}/data/output/Contamination.txt"
+    message: "$(date +%F_%T) - Extracting sample IDs and FREEMIX comlun for sample {sample_name}"
+    log: "log/combined_comtamination.log"
     shell:
         '''
         #!/bin/bash
 
-        # Create the output file
-        echo -e "SAMPLE\tFREEMIX" > {output.contamination}
+        echo {message} > {log}
+        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
 
-        # Iterate through *.selfSM files in the directory
-        for file in {input}/*.selfSM; do
-            # Extract SEQ_ID and FREEMIX columns and append to the output file
-            awk '{{print $1 "\t" $7}}' "$file" | tail -n +2 >> {output.contamination}
-        done
+        echo -e "SAMPLE\tFREEMIX" > {output}
+        awk '{{print $1 "\t" $7}}' "$file" | tail -n +2 >> {output}
+
+        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
         '''
 
 
 rule combined_pcs:
+    priority: 3
     input:
-        "{data_path}/data/output/contamination"
+        infile = expand("{data_path}/data/output/contamination/{sample_name}.Ancestry", \
+            data_path=data_path, sample_name=sample_name)
     output:
-        estimates = "{data_path}/data/output/all_estimated_pcs.txt"
+        outfile = temp("{data_path}/data/output/all_estimated_pcs.txt")
+    message: "$(date +%F_%T) - Extracting PCs and sample IDs for sample {sample_name}"
     shell:
         '''
         #!/bin/bash
 
-        # Create the output file with headers
-        echo -e "PC\tIntendedSample\tFile" > {output}
+        echo {message} > {log}
+        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
 
-        # Iterate through all *.Ancestry files in the directory
-        for file in {input}/*.Ancestry; do
-            # Extract PC and IntendedSample columns, and append to output.txt
-            awk '{{print $1 "\t" $3 "\t'"$(basename -s .Ancestry "$file")"'"}}' "$file" | tail -n +2 >> {output}
-        done
+        # Create the output file
+        echo -e "PC\tIntendedSample\tSAMPLE" > {output}
+        awk '{{print $1 "\t" $3 "\t" {sample_name} ' | tail -n +2 >> {output}
 
+        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
         '''
+
+
+rule generate_plots:
+    priority: 1
+    input:
+        ref_population_path = "{data_path}/data/input/1000G_reference_populations.txt",
+        sample_data_path = "{data_path}/data/output/all_estimated_pcs.txt"
+    output:
+        plt1 = "{data_path}/data/output/plots/PC1_PC2.png",
+        plt2 = "{data_path}/data/output/plots/PC2_PC3.png",
+        plt3 = "{data_path}/data/output/plots/PC3_PC4.png",
+        plt4 = "{data_path}/data/output/plots/PC1_PC2_PC3.png"
+    params:
+        VERIFY_BAM_ID_HOME = config['data_path']['root']
+    run:
+        pop_data_path: str = os.path.join(params.VERIFY_BAM_ID_HOME, "VerifyBamID/resource/1000g.phase3.100k.b38.vcf.gz.dat.V")
+
+        ref_population_df = load_data(input.ref_population_path, colnames=['SAMPLEID', 'Ancestry'])
+        pop_data_df = load_data(pop_data_path, colnames=['SAMPLEID', 'PC1', 'PC2', 'PC3', 'PC4'])
+
+        complete_reference_pop = pd.merge(ref_population_df, pop_data_df, on="SAMPLEID")
+        sample_data_df = load_data(input.sample_data_path)
+
+        sample_data_df = sample_data_df.\
+            pivot(index='SAMPLE', columns='PC', values='IntendedSample').reset_index()
+        sample_data_df['Ancestry'] = "Study"
+
+        sample_data_df.columns = ['SAMPLEID', 'PC1', 'PC2', 'PC3', 'PC4', 'Ancestry']
+
+        df_merged = pd.concat([complete_reference_pop, sample_data_df], ignore_index=True, sort=False)
+
+        plt = plot_data(df=df_merged, x_label="PC1", y_label="PC2", cols='Ancestry')
+        save_plot(plt=plt, path=output.plt1)
+
+        plt = plot_data(df=df_merged, x_label="PC2", y_label="PC3", cols='Ancestry')
+        save_plot(plt=plt, path=output.plt2)
+
+        plt = plot_data(df=df_merged, x_label="PC3", y_label="PC4", cols='Ancestry')
+        save_plot(plt=plt, path=output.plt3)
+
+        cols = px.colors.qualitative.Dark2
+        fig = px.scatter_3d(df_merged, x='PC1', y='PC2', z='PC3', color='Ancestry', color_discrete_sequence=cols)
+        fig.write_image(output.plt4, width=1920, height=1080)
+
+
+rule predict_ancestry:
+    input:
+        file = "{data_path}/data/output/all_estimated_pcs.txt"
+    output:
+        file = "{data_path}/data/output/Populations.csv"
+    params:
+        model = "{data_path}/data/model/calibrated_rf_ancestry.model"
+    run:
+        model = load(params.model)
+
+        sample_data_df = load_data(input.file)
+
+        sample_data_df = sample_data_df.\
+            pivot(index='SAMPLE', columns='PC', values='IntendedSample').\
+            reset_index()
+
+        sample_data_df.columns = ['SAMPLE', 'PC1', 'PC2', 'PC3', 'PC4']
+        final_df = sample_data_df.copy()
+
+        study_labels = model.predict(sample_data_df[['PC1', 'PC2', 'PC3', 'PC4']])
+        final_df['POPULATION'] = study_labels
+        
+        final_df.to_csv(output.file, sep="\t", index=False)
+
+

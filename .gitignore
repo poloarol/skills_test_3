@@ -1,7 +1,9 @@
-/data
+/data/input
+/data/output
 /reference
 /VerifyBamID
 /pipeline/.snakemake
 /pipeline/workflow/.snakemake
-/pipeline/logs
+/pipeline/log
 test.sh
+/output_old
