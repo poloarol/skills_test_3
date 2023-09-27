@@ -82,14 +82,10 @@ rule detect_contamination:
         outputfolder = "{data_path}/data/output/contamination/{sample_name}",
         num_pcs = 4
     threads: config['num_threads']
-    message: "$(date +%F_%T) - Analysing sample: {sample_name}"
     log: "{data_path}/pipeline/log/contamination/{sample_name}.log"
     shell:
         '''
         #!/bin/bash
-
-        echo {message} > {log}
-        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
 
         {data_path}/VerifyBamID/bin/VerifyBamID \
             --SVDPrefix {data_path}/VerifyBamID/{params.estimates} \
@@ -98,8 +94,6 @@ rule detect_contamination:
             --Output {params.outputfolder} \
             --NumPC {params.num_pcs} \
             --NumThread {threads} 2> {log}
-
-        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
         '''
 
 
@@ -111,19 +105,15 @@ rule combined_contamination:
             data_path=data_path, sample_name=sample_name)
     output:
         outfile = "{data_path}/data/output/Contamination.txt"
-    message: "$(date +%F_%T) - Extracting sample IDs and FREEMIX comlun for sample {sample_name}"
-    log: "log/combined_comtamination.log"
+    params:
+        indir = "{data_path}/data/output/contamination"
     shell:
         '''
         #!/bin/bash
 
-        echo {message} > {log}
-        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
-
-        echo -e "SAMPLE\tFREEMIX" > {output}
-        awk '{{print $1 "\t" $7}}' "$file" | tail -n +2 >> {output}
-
-        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
+        for file in {params.indir}/*.selfSM; do
+            awk '{{print $1 "\t" $7 }}' "${{file}}" | tail -n +2 >> {output}
+        done
         '''
 
 
@@ -133,20 +123,18 @@ rule combined_pcs:
         infile = expand("{data_path}/data/output/contamination/{sample_name}.Ancestry", \
             data_path=data_path, sample_name=sample_name)
     output:
-        outfile = temp("{data_path}/data/output/all_estimated_pcs.txt")
-    message: "$(date +%F_%T) - Extracting PCs and sample IDs for sample {sample_name}"
+        outfile = "{data_path}/data/output/all_estimated_pcs.txt"
+    params:
+        indir = "{data_path}/data/output/contamination"
     shell:
         '''
         #!/bin/bash
 
-        echo {message} > {log}
-        echo "$(date +%F_%T) - Beginning analysis of sample: {sample_name}" > {log}
-
         # Create the output file
         echo -e "PC\tIntendedSample\tSAMPLE" > {output}
-        awk '{{print $1 "\t" $3 "\t" {sample_name} ' | tail -n +2 >> {output}
-
-        echo "$(date +%F_%T) - Completing analysis of sample: {sample_name}" > {log}
+        for file in {params.indir}/*.Ancestry; do
+            awk '{{print $1 "\t" $3 "\t'"$(basename -s .Ancestry "${{file}}")"'"}}' "${{file}}" | tail -n +2 >> {output}
+        done
         '''
 
 
