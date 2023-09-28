@@ -1,5 +1,6 @@
 
 import glob
+import logging
 import warnings
 
 from pathlib import Path
@@ -47,14 +48,15 @@ pathlist = Path(data_path).glob("data/input/*.cram")
 
 contamination_targets = []
 tmp_contamination_targets = []
+samples = []
 
 for path in pathlist:
     sample_name = path.name.split('.')[0]
+    samples.append(sample_name)
     contamination_files = expand("{data_path}/data/output/contamination/{sample_name}.{ext}", 
         data_path=data_path, sample_name=sample_name, ext=['selfSM', 'Ancestry'])
 
     contamination_targets.extend(contamination_files)
-
 
 rule all:
     input:
@@ -66,7 +68,6 @@ rule all:
         expand("{data_path}/data/output/plots/PC3_PC4.png", data_path=data_path),
         expand("{data_path}/data/output/plots/PC1_PC2_PC3.png", data_path=data_path),
         expand("{data_path}/data/output/Populations.csv", data_path=data_path)
-
 
 rule detect_contamination:
     priority: 10
@@ -82,6 +83,7 @@ rule detect_contamination:
         outputfolder = "{data_path}/data/output/contamination/{sample_name}",
         num_pcs = 4
     threads: config['num_threads']
+    message: "Detecting level of contamination in sample: {sample_name}"
     log: "{data_path}/pipeline/log/contamination/{sample_name}.log"
     shell:
         '''
@@ -96,44 +98,51 @@ rule detect_contamination:
             --NumThread {threads} 2> {log}
         '''
 
-
-
 rule combined_contamination:
     priority: 2
     input:
-        infile = expand("{data_path}/data/output/contamination/{sample_name}.selfSM", \
-            data_path=data_path, sample_name=sample_name)
+        infile = expand("{data_path}/data/output/contamination/{sample_name}.selfSM", 
+            data_path=data_path, sample_name=samples)
     output:
         outfile = "{data_path}/data/output/Contamination.txt"
     params:
         indir = "{data_path}/data/output/contamination"
+    message: "Aggregating selfSM file"
+    log: "{data_path}/pipeline/log/aggregate.contamination.log"
     shell:
         '''
         #!/bin/bash
+        echo -e "SAMPLEID\tFREEMIX" >> {output}
 
-        for file in {params.indir}/*.selfSM; do
+        for file in {input}; do
+            echo "Starting to add data from sample: $(basename -s .selfSM "${{file}}")"
             awk '{{print $1 "\t" $7 }}' "${{file}}" | tail -n +2 >> {output}
+            echo "Finished adding data from sample: $(basename -s .selSM "${{file}}")"
         done
         '''
 
 
 rule combined_pcs:
-    priority: 3
+    priority: 2
     input:
-        infile = expand("{data_path}/data/output/contamination/{sample_name}.Ancestry", \
-            data_path=data_path, sample_name=sample_name)
+        infile = expand("{data_path}/data/output/contamination/{sample_name}.Ancestry",
+            data_path=data_path, sample_name=samples)
     output:
-        outfile = "{data_path}/data/output/all_estimated_pcs.txt"
+        outfile = temp("{data_path}/data/output/all_estimated_pcs.txt")
     params:
         indir = "{data_path}/data/output/contamination"
+    message: "Aggregating Ancestry file"
+    log: "{data_path}/pipeline/log/aggregate.ancestry.log"
     shell:
         '''
         #!/bin/bash
 
         # Create the output file
         echo -e "PC\tIntendedSample\tSAMPLE" > {output}
-        for file in {params.indir}/*.Ancestry; do
+        for file in {input}; do
+            echo "Adding data from sample: $(basename -s .Ancestry "${{file}}")"
             awk '{{print $1 "\t" $3 "\t'"$(basename -s .Ancestry "${{file}}")"'"}}' "${{file}}" | tail -n +2 >> {output}
+            echo "Finished adding data from sample: $(basename -s .Ancestry "${{file}}")"
         done
         '''
 
@@ -150,6 +159,8 @@ rule generate_plots:
         plt4 = "{data_path}/data/output/plots/PC1_PC2_PC3.png"
     params:
         VERIFY_BAM_ID_HOME = config['data_path']['root']
+    message: "Generating plots from PCs"
+    log: "{data_path}/pipeline/log/generate.plot.log"
     run:
         pop_data_path: str = os.path.join(params.VERIFY_BAM_ID_HOME, "VerifyBamID/resource/1000g.phase3.100k.b38.vcf.gz.dat.V")
 
@@ -157,12 +168,12 @@ rule generate_plots:
         pop_data_df = load_data(pop_data_path, colnames=['SAMPLEID', 'PC1', 'PC2', 'PC3', 'PC4'])
 
         complete_reference_pop = pd.merge(ref_population_df, pop_data_df, on="SAMPLEID")
+
         sample_data_df = load_data(input.sample_data_path)
-
         sample_data_df = sample_data_df.\
-            pivot(index='SAMPLE', columns='PC', values='IntendedSample').reset_index()
-        sample_data_df['Ancestry'] = "Study"
-
+            pivot(index='SAMPLE', columns='PC', values='IntendedSample').\
+            reset_index()
+        sample_data_df['Ancestry'] = 'STUDY'
         sample_data_df.columns = ['SAMPLEID', 'PC1', 'PC2', 'PC3', 'PC4', 'Ancestry']
 
         df_merged = pd.concat([complete_reference_pop, sample_data_df], ignore_index=True, sort=False)
@@ -188,6 +199,7 @@ rule predict_ancestry:
         file = "{data_path}/data/output/Populations.csv"
     params:
         model = "{data_path}/data/model/calibrated_rf_ancestry.model"
+    message: "Predicting ancestry of individuals in study using a RF classifier"
     run:
         model = load(params.model)
 
