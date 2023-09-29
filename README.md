@@ -36,9 +36,15 @@
 
 ## Setup working environment
 
-1 - If you do not have Anaconda, please install it using the following directives: `https://linuxize.com/post/how-to-install-anaconda-on-ubuntu-20-04/`
-2 - Then create a conda environment using the following command: `conda env create --file environment.yml`
-3 - Activate the conda environment: `conda activate cerc-skill-test`
+- If you do not have Anaconda, please install it using the following directives: `https://linuxize.com/post/how-to-install-anaconda-on-ubuntu-20-04/`
+- Then create a conda environment using the following command: `conda env create --file environment.yml`
+- Activate the conda environment: `conda activate cerc-skill-test`
+
+## Download reference files
+- In the `\skills_test_3` folder, run the following command to download reference file: `bash download_references.sh`
+
+## Download input data and models
+- Download the `data.zip` (https://drive.google.com/file/d/1dLIizw-Z-m9xSgX6xHKNSLibfZTOB08Y/view?usp=sharing) folder and place it in the `\skills_test_3` directory, and the unzip it.
 
 ## Update config file
 - Update the `config.yaml` file within the `/pipeline/config` directory
