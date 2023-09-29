@@ -46,6 +46,17 @@
 ## Download input data and models
 - Download the `data.zip` (https://drive.google.com/file/d/1dLIizw-Z-m9xSgX6xHKNSLibfZTOB08Y/view?usp=sharing) folder and place it in the `\skills_test_3` directory, and the unzip it.
 
+## Download and build VerifyBamID
+Within the `/skills_test_3` directory:
+    - clone the VerifyBamID repository: `git clone https://github.com/Griffan/VerifyBamID.git`
+    - Do the following sequentially:
+        ` cd VerifyBamID `
+        ` mkdir build `
+        ` cd build `
+        ` cmake .. `
+        ` make `
+        ` make test `
+
 ## Update config file
 - Update the `config.yaml` file within the `/pipeline/config` directory
     - `root`: Complete path to the `skill_test_3` directory
