@@ -115,9 +115,9 @@ rule combined_contamination:
         echo -e "SAMPLEID\tFREEMIX" >> {output}
 
         for file in {input}; do
-            echo "Starting to add data from sample: $(basename -s .selfSM "${{file}}")"
+            echo "Starting to add data from sample: $(basename -s .selfSM "${{file}}")" >> {log}
             awk '{{print $1 "\t" $7 }}' "${{file}}" | tail -n +2 >> {output}
-            echo "Finished adding data from sample: $(basename -s .selSM "${{file}}")"
+            echo "Finished adding data from sample: $(basename -s .selfSM "${{file}}")" >> {log}
         done
         '''
 
@@ -128,7 +128,7 @@ rule combined_pcs:
         infile = expand("{data_path}/data/output/contamination/{sample_name}.Ancestry",
             data_path=data_path, sample_name=samples)
     output:
-        outfile = temp("{data_path}/data/output/all_estimated_pcs.txt")
+        outfile = "{data_path}/data/output/all_estimated_pcs.txt"
     params:
         indir = "{data_path}/data/output/contamination"
     message: "Aggregating Ancestry file"
@@ -140,9 +140,9 @@ rule combined_pcs:
         # Create the output file
         echo -e "PC\tIntendedSample\tSAMPLE" > {output}
         for file in {input}; do
-            echo "Adding data from sample: $(basename -s .Ancestry "${{file}}")"
+            echo "Adding data from sample: $(basename -s .Ancestry "${{file}}")" >> {log}
             awk '{{print $1 "\t" $3 "\t'"$(basename -s .Ancestry "${{file}}")"'"}}' "${{file}}" | tail -n +2 >> {output}
-            echo "Finished adding data from sample: $(basename -s .Ancestry "${{file}}")"
+            echo "Finished adding data from sample: $(basename -s .Ancestry "${{file}}")" >> {log}
         done
         '''
 
@@ -198,7 +198,8 @@ rule predict_ancestry:
     output:
         file = "{data_path}/data/output/Populations.csv"
     params:
-        model = "{data_path}/data/model/calibrated_rf_ancestry.model"
+        rf = "{data_path}/data/model/calibrated_rf_ancestry.model",
+        scaler = "{data_path}/data/model/standard_scaler.model"
     message: "Predicting ancestry of individuals in study using a RF classifier"
     run:
         model = load(params.model)
@@ -208,6 +209,7 @@ rule predict_ancestry:
         sample_data_df = sample_data_df.\
             pivot(index='SAMPLE', columns='PC', values='IntendedSample').\
             reset_index()
+        sample_data_df = params.scaler.transform(sample_data_df)
 
         sample_data_df.columns = ['SAMPLE', 'PC1', 'PC2', 'PC3', 'PC4']
         final_df = sample_data_df.copy()
